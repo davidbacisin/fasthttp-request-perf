@@ -1,6 +1,7 @@
 package fasthttp_request_perf
 
 import (
+	"bytes"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -61,18 +62,21 @@ func (c *MockConn) Close() error {
 	return nil
 }
 
-/* The Local and Remote addresses don't matter for these benchmarks because we're never going to
- * connect to an actual host
+/* The Local and Remote addresses don't matter for these benchmarks because we're
+ * never going to connect to an actual host. However, we want to use a static address
+ * instance to avoid allocating unnecessary bytes during benchmarking.
  */
+var mockServerAddr = net.TCPAddr{
+	IP:   []byte{1, 2, 3, 4},
+	Port: 8542,
+}
+
 func (c *MockConn) LocalAddr() net.Addr {
-	return &net.TCPAddr{
-		IP:   []byte{1, 2, 3, 4},
-		Port: 8542,
-	}
+	return &mockServerAddr
 }
 
 func (c *MockConn) RemoteAddr() net.Addr {
-	return c.LocalAddr()
+	return &mockServerAddr
 }
 
 func BenchmarkNetHttpClientToMockServer(b *testing.B) {
@@ -112,7 +116,7 @@ func BenchmarkNetHttpClientToMockServer(b *testing.B) {
 }
 
 func BenchmarkFastHttpClientToMockServer(b *testing.B) {
-	// Create an http.Client
+	// Create a client
 	client := &fasthttp.Client{
 		Dial: func(addr string) (net.Conn, error) {
 			return mockServerConnectionPool.Get().(*MockConn), nil
@@ -133,13 +137,50 @@ func BenchmarkFastHttpClientToMockServer(b *testing.B) {
 			if statusCode != fasthttp.StatusOK {
 				b.Fatalf("expected status code %d but got %d", fasthttp.StatusOK, statusCode)
 			}
-			if statusCode != fasthttp.StatusOK {
-				b.Fatalf("expected status code %d but got %d", fasthttp.StatusOK, statusCode)
-			}
 			if string(body) != testValue {
 				b.Fatalf("expected body %q but got %q", testValue, body)
 			}
 			buffer = body
+		}
+	})
+}
+
+func BenchmarkFastHttpClientWithManagedBuffersToMockServer(b *testing.B) {
+	// Create a client
+	client := &fasthttp.Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return mockServerConnectionPool.Get().(*MockConn), nil
+		},
+		// Set the maximum number of idle connections equal to the max number of processes
+		MaxConnsPerHost: runtime.GOMAXPROCS(-1),
+	}
+
+	testValue := []byte("123")
+	testUrl := "http://host.test/query"
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			// Acquire a request instance
+			req := fasthttp.AcquireRequest()
+			req.SetRequestURI(testUrl)
+
+			// Acquire a response instance
+			resp := fasthttp.AcquireResponse()
+
+			err := client.Do(req, resp)
+			if err != nil {
+				b.Fatalf("client get failed: %s", err)
+			}
+			if resp.StatusCode() != fasthttp.StatusOK {
+				b.Fatalf("expected status code %d but got %d", fasthttp.StatusOK, resp.StatusCode())
+			}
+			body := resp.Body()
+			if !bytes.Equal(body, testValue) {
+				b.Fatalf("expected body %q but got %q", testValue, body)
+			}
+
+			// Release the request and response
+			fasthttp.ReleaseRequest(req)
+			fasthttp.ReleaseResponse(resp)
 		}
 	})
 }
