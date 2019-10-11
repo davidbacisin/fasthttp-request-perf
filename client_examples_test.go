@@ -60,12 +60,14 @@ func ExampleGetGzippedJsonWithFastHttp() {
 	req := fasthttp.AcquireRequest()
 	defer fasthttp.ReleaseRequest(req)
 	req.SetRequestURI("https://httpbin.org/json")
-	// fasthttp does not automatically request a gzipped response. We must explicitly ask for it.
+	// fasthttp does not automatically request a gzipped response.
+	// We must explicitly ask for it.
 	req.Header.Set("Accept-Encoding", "gzip")
 
 	resp := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseResponse(resp)
 
+	// Perform the request
 	err := fasthttp.Do(req, resp)
 	if err != nil {
 		fmt.Printf("Client get failed: %s\n", err)
@@ -76,12 +78,14 @@ func ExampleGetGzippedJsonWithFastHttp() {
 		return
 	}
 
+	// Verify the content type
 	contentType := resp.Header.Peek("Content-Type")
 	if bytes.Index(contentType, []byte("application/json")) != 0 {
 		fmt.Printf("Expected content type application/json but got %s\n", contentType)
 		return
 	}
 
+	// Do we need to decompress the response?
 	contentEncoding := resp.Header.Peek("Content-Encoding")
 	var body []byte
 	if bytes.EqualFold(contentEncoding, []byte("gzip")) {
@@ -110,12 +114,14 @@ func ExampleGetGzippedJsonWithNetHttp() {
 		return
 	}
 
+	// Verify the content type
 	contentType := resp.Header.Get("Content-Type")
 	if strings.Index(contentType, "application/json") != 0 {
 		fmt.Printf("Expected content type application/json but got %s\n", contentType)
 		return
 	}
 
+	// Note that we haven't needed to check for gzip compression
 	body, _ := ioutil.ReadAll(resp.Body)
 
 	fmt.Printf("Response body is: %s", body)
